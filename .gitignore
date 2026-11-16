@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# 采集产物：含本地绝对路径和会话记录，不入库
+data.json
+data-*.json

@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>螺旋日程 · AI 会话盘</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --line:#232c38;
+    --fg:#e6edf3; --dim:#7d8896; --dim2:#4d5763;
+    --accent:#58a6ff;
+    --c1:#5B8FF9; --c2:#5AD8A6; --c3:#F6BD16; --c4:#E8684A; --c5:#6DC8EC;
+    --c6:#9270CA; --c7:#FF9D4D; --c8:#269A99; --c9:#FF99C3; --c10:#8AB4F8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro SC","PingFang SC","Helvetica Neue",sans-serif;
+    display:flex; overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #stage{flex:1; position:relative; min-width:0}
+  canvas{display:block; width:100%; height:100%; cursor:crosshair}
+
+  /* ── 顶部信息 ── */
+  .hud{
+    position:absolute; top:20px; left:24px; z-index:5; pointer-events:none;
+  }
+  .hud .date{
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--dim); margin-bottom:5px; display:flex; align-items:center; gap:6px;
+    pointer-events:auto;
+  }
+  .hud .date button{
+    background:var(--panel); border:1px solid var(--line); color:var(--dim);
+    border-radius:5px; width:20px; height:20px; cursor:pointer; font-size:12px;
+    display:grid; place-items:center; padding:0; line-height:1;
+  }
+  .hud .date button:hover{color:var(--fg); border-color:#31404f}
+  .hud .date button#dToday{width:auto; padding:0 7px; font-size:9.5px; letter-spacing:.1em}
+  .hud .date button:disabled{opacity:.3; cursor:default}
+  .hud .clock{
+    font-size:34px; font-weight:200; letter-spacing:-.02em;
+    font-variant-numeric:tabular-nums; line-height:1;
+  }
+  .hud .clock small{font-size:14px; color:var(--dim); font-weight:400; margin-left:8px}
+
+  /* ── 右下容量 ── */
+  .cap{
+    position:absolute; bottom:20px; left:24px; z-index:5;
+    font-size:11.5px; color:var(--dim); line-height:1.9; pointer-events:none;
+  }
+  .cap b{color:var(--fg); font-weight:500; font-variant-numeric:tabular-nums}
+  .capbar{
+    width:180px; height:3px; background:var(--line); border-radius:2px;
+    margin:7px 0 8px; overflow:hidden;
+  }
+  .capbar i{
+    display:block; height:100%; border-radius:2px;
+    background:linear-gradient(90deg,var(--c1),var(--c2));
+    transition:width .6s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* ── 播放按钮 ── */
+  .play{
+    position:absolute; bottom:20px; right:20px; z-index:6;
+    display:flex; gap:8px; align-items:center;
+  }
+  .play button{
+    background:var(--panel); color:var(--fg); border:1px solid var(--line);
+    border-radius:8px; padding:8px 14px; font-size:12px; cursor:pointer;
+    font-family:inherit; transition:all .18s;
+  }
+  .play button:hover{background:#1c2530; border-color:#31404f}
+  .play button:active{transform:scale(.97)}
+  .play button.on{background:var(--c1); border-color:var(--c1); color:#08111c; font-weight:600}
+
+  /* ── 右侧面板 ── */
+  aside{
+    width:318px; flex:0 0 318px; background:var(--panel);
+    border-left:1px solid var(--line); display:flex; flex-direction:column;
+    overflow:hidden;
+  }
+  aside header{
+    padding:18px 18px 12px; border-bottom:1px solid var(--line);
+  }
+  aside h1{font-size:13px; font-weight:600; letter-spacing:.02em}
+  aside h1 span{color:var(--dim); font-weight:400; margin-left:6px; font-size:11px}
+  .scroll{overflow-y:auto; flex:1; padding:10px 0}
+  .scroll::-webkit-scrollbar{width:8px}
+  .scroll::-webkit-scrollbar-thumb{background:#232c38; border-radius:4px}
+  .scroll::-webkit-scrollbar-thumb:hover{background:#31404f}
+  .scroll::-webkit-scrollbar-track{background:transparent}
+
+  .grp{padding:0 18px}
+  .glabel{
+    font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--dim2); margin:14px 0 7px; font-weight:600;
+  }
+
+  .row{
+    display:flex; align-items:center; gap:9px; padding:7px 8px;
+    border-radius:7px; cursor:pointer; transition:background .15s;
+    margin:0 -8px;
+  }
+  .row:hover,.row.hot{background:#1c2530}
+  .dot{width:7px; height:7px; border-radius:50%; flex:0 0 7px}
+  .rname{
+    flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .rname em{color:var(--dim); font-style:normal; font-size:10.5px; margin-left:5px}
+  .rmeta{
+    font-size:10.5px; color:var(--dim); font-variant-numeric:tabular-nums;
+    text-align:right; flex:0 0 auto;
+  }
+  .rmeta b{color:var(--fg); font-weight:500}
+  .src{
+    flex:0 0 auto; font-size:8.5px; letter-spacing:.06em; padding:1.5px 5px;
+    border-radius:4px; border:1px solid var(--line); color:var(--dim);
+    text-transform:uppercase;
+  }
+  .src.claude{color:#9ecbff; border-color:#2c4a6e}
+  .src.codex{color:#f0b37e; border-color:#5a4028}
+  .src.pi{color:#b9a8f5; border-color:#443764}
+
+  .todo{
+    display:flex; gap:8px; padding:6px 8px; margin:0 -8px; border-radius:7px;
+    font-size:11.5px; line-height:1.5; align-items:flex-start;
+    transition:background .15s;
+  }
+  .todo:hover{background:#1c2530}
+  .tick{
+    flex:0 0 13px; height:13px; border-radius:4px; border:1.5px solid var(--dim2);
+    margin-top:1.5px; display:grid; place-items:center; font-size:9px;
+  }
+  .todo.done .tick{background:var(--c2); border-color:var(--c2); color:#08111c}
+  .todo.blocked .tick{border-color:var(--c3); color:var(--c3)}
+  .todo.done .ttext{color:var(--dim); text-decoration:line-through;
+    text-decoration-color:var(--dim2)}
+  .ttext{flex:1; overflow:hidden}
+  .ttext .res{
+    display:block; color:var(--dim2); font-size:10.5px; margin-top:2px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  /* ── tooltip ── */
+  #tip{
+    position:fixed; z-index:20; pointer-events:none; opacity:0;
+    background:#1c2530; border:1px solid #31404f; border-radius:8px;
+    padding:9px 12px; font-size:11.5px; line-height:1.6;
+    box-shadow:0 8px 28px rgba(0,0,0,.55); transition:opacity .12s;
+    max-width:250px; backdrop-filter:blur(8px);
+  }
+  #tip.on{opacity:1}
+  #tip b{font-weight:600}
+  #tip .tm{color:var(--c5); font-variant-numeric:tabular-nums}
+  #tip .sub{color:var(--dim); font-size:10.5px; margin-top:3px}
+
+  /* ── 会话详情卡 ── */
+  #detail{
+    position:absolute; z-index:15; width:300px; max-height:70%;
+    background:#141a22; border:1px solid #31404f; border-radius:12px;
+    box-shadow:0 16px 48px rgba(0,0,0,.6); backdrop-filter:blur(10px);
+    display:none; overflow:hidden; flex-direction:column;
+  }
+  #detail.on{display:flex; animation:pop .16s cubic-bezier(.3,1.4,.6,1)}
+  @keyframes pop{from{transform:scale(.94); opacity:0} to{transform:scale(1); opacity:1}}
+  #detail header{
+    padding:13px 15px 10px; border-bottom:1px solid var(--line);
+    display:flex; align-items:flex-start; gap:8px;
+  }
+  #detail header .dh{flex:1; min-width:0}
+  #detail h2{font-size:13.5px; font-weight:600; line-height:1.35; margin:0}
+  #detail .dsrc{display:inline-block; margin-top:5px}
+  #detail .x{
+    background:none; border:none; color:var(--dim); font-size:16px;
+    cursor:pointer; padding:2px 4px; line-height:1;
+  }
+  #detail .x:hover{color:var(--fg)}
+  #detail .body{overflow-y:auto; padding:10px 15px 14px}
+  #detail .fp{
+    font-size:11px; line-height:1.55; color:#c9d4df; background:#1a2230;
+    border-left:2.5px solid var(--accent); padding:8px 10px; border-radius:0 7px 7px 0;
+    margin:4px 0 12px; word-break:break-all;
+  }
+  #detail .fp .lbl{
+    display:block; font-size:9px; letter-spacing:.12em; color:var(--dim2);
+    text-transform:uppercase; margin-bottom:4px; font-weight:600;
+  }
+  #detail .seg{
+    display:flex; align-items:center; gap:8px; padding:5px 7px; margin:0 -7px;
+    border-radius:6px; cursor:pointer; font-size:11px;
+    font-variant-numeric:tabular-nums;
+  }
+  #detail .seg:hover{background:#1c2530}
+  #detail .seg .t{color:var(--c5); flex:0 0 auto}
+  #detail .seg .d{color:var(--dim); flex:1; text-align:right}
+  #detail .dstat{font-size:10.5px; color:var(--dim); margin-bottom:8px; line-height:1.7}
+
+  /* ── 嵌入按钮 ── */
+  .embed{
+    position:absolute; top:20px; right:20px; z-index:6;
+  }
+  .embed button{
+    background:var(--panel); color:var(--dim); border:1px solid var(--line);
+    border-radius:8px; padding:7px 12px; font-size:11px; cursor:pointer;
+    font-family:inherit; transition:all .18s;
+  }
+  .embed button:hover{color:var(--fg); border-color:#31404f}
+
+  .empty{padding:26px 18px; color:var(--dim2); font-size:11.5px; line-height:1.7}
+  .morebtn{
+    margin:8px 0 2px; padding:6px; text-align:center; font-size:10.5px;
+    color:var(--dim); cursor:pointer; border:1px dashed var(--line);
+    border-radius:6px; transition:all .15s;
+  }
+  .morebtn:hover{color:var(--fg); border-color:#31404f; background:#1c2530}
+
+  /* 窄屏：侧栏收窄，别把主图挤没 */
+  @media (max-width: 1100px){
+    aside{width:250px; flex:0 0 250px}
+    .hud .clock{font-size:27px}
+    .capbar{width:140px}
+  }
+  @media (max-width: 820px){
+    aside{display:none}
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="cv"></canvas>
+
+  <div class="hud">
+    <div class="date">
+      <button id="dPrev" title="前一天">‹</button>
+      <span id="hudDate">—</span>
+      <button id="dNext" title="后一天">›</button>
+      <button id="dToday" title="回到今天">今天</button>
+    </div>
+    <div class="clock"><span id="hudClock">--:--</span><small id="hudMeta"></small></div>
+  </div>
+
+  <div class="cap">
+    <div>已记录 <b id="capRec">—</b> · 空白 <b id="capGap">—</b></div>
+    <div class="capbar"><i id="capFill" style="width:0%"></i></div>
+    <div id="capPct" style="color:var(--dim2)"></div>
+  </div>
+
+  <div class="embed">
+    <button id="btnEmbed" title="复制嵌入代码，粘贴进任意笔记">嵌到 Obsidian</button>
+  </div>
+
+  <div class="play">
+    <button id="btnPlay">▶ 播放今天</button>
+    <button id="btnLive" class="on">● 实时</button>
+  </div>
+
+  <div id="detail"></div>
+</div>
+
+<aside>
+  <header>
+    <h1>AI 会话盘 <span id="sideDate"></span></h1>
+  </header>
+  <div class="scroll">
+    <div class="grp">
+      <div class="glabel">会话来源</div>
+      <div id="agentList"></div>
+    </div>
+    <div class="grp">
+      <div class="glabel">今日待办</div>
+      <div id="todoList"></div>
+    </div>
+    <div class="grp" id="journalGrp" style="display:none">
+      <div class="glabel">日记记录</div>
+      <div id="journalList"></div>
+    </div>
+  </div>
+</aside>
+
+<div id="tip"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  数据
+// ══════════════════════════════════════════════════════════════
+const COLORS = ['--c1','--c2','--c3','--c4','--c5','--c6','--c7','--c8','--c9','--c10']
+  .map(v => getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+
+let DATA = null;
+let dayStart = 0, dayEnd = 0;      // epoch ms
+const DAY_MS = 86400000;
+
+let agents = [];      // {name,color,segments:[[t0,t1]](秒), tokens, msgs}
+let todos = [];
+let journal = [];     // 日记里手写的时间戳 [{t,time,text}]
+let hotJournal = -1;
+let showAllAgents = false;   // 侧栏是否展开全部来源
+
+// 视图状态
+let nowT = 0;          // 当前显示的时刻（0..86400 秒）
+let liveMode = true;
+let playing = false;   // 是否在回放
+let playT = -1;        // 回放进度（秒），-1 表示不在回放
+let playStart = 0;     // Date.now() 起播时刻
+let hotIdx = -1;       // 悬停的段索引
+let hotAgent = -1;
+
+// ══════════════════════════════════════════════════════════════
+//  加载
+// ══════════════════════════════════════════════════════════════
+// ── 加载某一天的数据 ─────────────────────────────────────────
+let viewDate = null;      // 'YYYY-MM-DD'
+let todayStr = null;      // 'YYYY-MM-DD'（真实今天）
+
+async function loadDay(dateStr, silent=false){
+  try{
+    const r = await fetch(`data-${dateStr}.json?t=${Date.now()}`);
+    if(!r.ok) throw new Error(r.status);
+    DATA = await r.json();
+  }catch(e){
+    if(!silent){
+      tipEl.classList.add('on');
+      tipEl.innerHTML = `<b>${dateStr} 没有数据</b>
+        <div class="sub">先跑：python3 collect.py &lt;库路径&gt; ${dateStr}</div>`;
+      setTimeout(()=>{ if(!hotAgent && !hotJournal) tipEl.classList.remove('on'); }, 3500);
+    }
+    return false;
+  }
+  viewDate = DATA.date;
+  prepare();
+  buildSidebar();
+  updateHUD();
+  updateDateBtns();
+  return true;
+}
+
+async function boot(){
+  const now = new Date();
+  todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const ok = await loadDay(todayStr);
+  if(!ok){
+    // 今天没数据就退回最近有数据的一天
+    try{
+      const r = await fetch('data.json?t=' + Date.now());
+      DATA = await r.json();
+      viewDate = DATA.date;
+      prepare(); buildSidebar(); updateHUD(); updateDateBtns();
+    }catch(e2){
+      tipEl.classList.add('on');
+      tipEl.innerHTML = '<b>读不到任何数据</b><div class="sub">先跑 collect.py</div>';
+      return;
+    }
+  }
+  resize();
+  toggleBtns();
+  requestAnimationFrame(loop);
+  startAutoRefresh();
+}
+
+// ── 自动刷新：看今天且处于实时模式时，每 60 秒检查一次 ────────
+let lastGenerated = null;
+function startAutoRefresh(){
+  lastGenerated = DATA && DATA.generated;
+  setInterval(async ()=>{
+    if(viewDate !== todayStr || playing) return;
+    try{
+      const r = await fetch(`data-${todayStr}.json?t=${Date.now()}`);
+      if(!r.ok) return;
+      const d = await r.json();
+      if(d.generated === lastGenerated) return;   // 没变化
+      lastGenerated = d.generated;
+      DATA = d;
+      prepare();
+      buildSidebar();
+      nowT = Math.max(0, Math.min(TOTAL, (Date.now() - dayStart)/1000));
+      updateHUD();
+    }catch(e){}
+  }, 60000);
+}
+
+// ── 日期导航 ────────────────────────────────────────────────
+function shiftDay(n){
+  const [y,m,d] = viewDate.split('-').map(Number);
+  const dt = new Date(y, m-1, d + n);
+  const s = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  loadDay(s);
+}
+function updateDateBtns(){
+  document.getElementById('dNext').disabled = (viewDate >= todayStr);
+  document.getElementById('dToday').disabled = (viewDate === todayStr);
+}
+document.getElementById('dPrev').onclick = ()=> shiftDay(-1);
+document.getElementById('dNext').onclick = ()=> { if(viewDate < todayStr) shiftDay(1); };
+document.getElementById('dToday').onclick = ()=> loadDay(todayStr);
+
+function prepare(){
+  const [y,m,d] = DATA.date.split('-').map(Number);
+  dayStart = new Date(y, m-1, d, 0,0,0,0).getTime();
+  dayEnd = dayStart + DAY_MS;
+
+  // 按 token 降序分配颜色，把最亮的给最活跃的
+  const sorted = [...(DATA.agents || [])].sort((x,y)=> (y.tokens||0)-(x.tokens||0));
+  const colorOf = new Map();
+  sorted.forEach((a,i) => colorOf.set(a.name, COLORS[i % COLORS.length]));
+
+  agents = (DATA.agents || []).map((a,i) => ({
+    name: a.name,
+    source: a.source || 'claude',
+    color: colorOf.get(a.name) || COLORS[i % COLORS.length],
+    tokens: a.tokens || 0,
+    msgs: a.msgs || 0,
+    segments: (a.spans || []).map(([s,e]) => {
+      const t0 = Math.max(0, (s*1000 - dayStart)/1000);
+      const t1 = Math.min(86400, (e*1000 - dayStart)/1000);
+      return [t0, Math.max(t0+1, t1)];
+    }).filter(([a2,b2]) => b2 > a2)
+  })).filter(a => a.segments.length);
+
+  todos = DATA.todos || [];
+  journal = DATA.journal || [];
+
+  const now = new Date();
+  const isToday = now.getTime() >= dayStart && now.getTime() < dayEnd;
+  nowT = isToday ? (now.getTime() - dayStart)/1000 : 86400;
+
+  document.getElementById('hudDate').textContent =
+    `${y}年${m}月${d}日 · ${'日一二三四五六'[new Date(y,m-1,d).getDay()]}曜日`;
+  document.getElementById('sideDate').textContent = DATA.date;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  螺旋几何
+// ══════════════════════════════════════════════════════════════
+const TURNS = 6;                       // 24h / 6 = 每圈 4 小时，连续向内盘成一整条
+const TOTAL = 86400;
+
+let CX=0, CY=0, R_OUT=0, R_IN=0;
+
+function geom(){
+  const cv = document.getElementById('cv');
+  const w = cv.clientWidth, h = cv.clientHeight;
+  CX = w/2; CY = h/2;
+  R_OUT = Math.min(w, h) * 0.455;
+  R_IN  = R_OUT * 0.34;                // 内圈留够，中心钟面才不挤
+}
+
+/** t: 0..86400 秒 → {x,y,r,theta} */
+function spiral(t){
+  const f = Math.max(0, Math.min(1, t / TOTAL));
+  const theta = f * TURNS * Math.PI * 2 - Math.PI/2;
+  const r = R_OUT - (R_OUT - R_IN) * f;
+  return {
+    x: CX + Math.cos(theta) * r,
+    y: CY + Math.sin(theta) * r,
+    r, theta, f
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  绘制
+// ══════════════════════════════════════════════════════════════
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let DPR = 1;
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = cv.clientWidth * DPR;
+  cv.height = cv.clientHeight * DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  geom();
+}
+
+function draw(){
+  const w = cv.clientWidth, h = cv.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  const tNow = playT >= 0 ? playT : nowT;
+
+  // ── 1. 螺旋基线（连续一条，从外盘到内）──
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for(let t=0; t<=TOTAL; t+=60){
+    const p = spiral(t);
+    t===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y);
+  }
+  ctx.strokeStyle = '#171f28';
+  ctx.lineWidth = 13;
+  ctx.stroke();
+
+  // ── 2. 已过时间：淡淡的一层，给出"已翻过的页"感 ──
+  if(tNow > 0){
+    ctx.beginPath();
+    for(let t=0; t<=tNow; t+=60){
+      const p = spiral(t);
+      t===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y);
+    }
+    ctx.strokeStyle = 'rgba(120,160,210,0.05)';
+    ctx.lineWidth = 13;
+    ctx.stroke();
+  }
+
+  // ── 3. 整点分隔：只在每圈起点（0/4/8/12/16/20 点）打标 ──
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const SPAN_S = TOTAL / TURNS;                  // 每圈秒数 = 4h
+  for(let turn=0; turn<=TURNS; turn++){
+    const t = turn * SPAN_S;
+    if(t > TOTAL) break;
+    const p = spiral(Math.min(t, TOTAL));
+    const p2 = spiral(Math.min(t + 40, TOTAL));
+    const dx = (p2.x-p.x)||1, dy = (p2.y-p.y)||0;
+    const m = Math.hypot(dx,dy) || 1;
+
+    ctx.beginPath();
+    ctx.moveTo(p.x + dx/m*8, p.y + dy/m*8);
+    ctx.lineTo(p.x + dx/m*22, p.y + dy/m*22);
+    ctx.strokeStyle = '#3d4c5e';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    const hh = Math.round(t/3600) % 24;
+    const active = Math.abs(tNow - t) < SPAN_S;
+    ctx.fillStyle = active ? '#8fb9e8' : '#404a56';
+    ctx.font = '500 10.5px -apple-system,sans-serif';
+    ctx.fillText(String(hh).padStart(2,'0'),
+      p.x + dx/m*34, p.y + dy/m*34);
+  }
+
+  // 每 2 小时一个小刻度
+  for(let hh=0; hh<24; hh++){
+    if(hh % 4 === 0) continue;
+    const t = hh*3600;
+    const p = spiral(t), p2 = spiral(t+40);
+    const dx=(p2.x-p.x)||1, dy=(p2.y-p.y)||0;
+    const m=Math.hypot(dx,dy)||1;
+    ctx.beginPath();
+    ctx.moveTo(p.x + dx/m*8, p.y + dy/m*8);
+    ctx.lineTo(p.x + dx/m*15, p.y + dy/m*15);
+    ctx.strokeStyle = '#242e39';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // ── 4. agent 会话段 ──
+  // 按段落长度排序，长的先画（短的压在上面，不会被盖掉）
+  const segsToDraw = [];
+  agents.forEach((ag, ai) => {
+    ag.segments.forEach(([s,e], si) => {
+      if(s > tNow) return;
+      segsToDraw.push({ag, ai, si, s, e: Math.min(e, tNow)});
+    });
+  });
+  segsToDraw.sort((a,b) => (b.e-b.s) - (a.e-a.s));
+
+  segsToDraw.forEach(({ag, ai, si, s, e}) => {
+      if(e <= s) return;
+      const isHot = (hotAgent === ai && hotIdx === si);
+      const dur = e - s;
+
+      // 太短的段给它一个最小可见长度（0.6 秒的最小视觉弧）
+      const drawE = Math.max(e, s + Math.max(45, Math.min(180, 900/Math.max(dur,1))));
+
+      ctx.save();
+      ctx.lineCap = 'round';
+
+      // 路径点（复用，避免重复计算）
+      const pts = [];
+      const n = Math.max(6, Math.min(120, Math.ceil(drawE - s) / 12));
+      for(let i=0; i<=n; i++){
+        const t = s + (drawE - s) * (i/n);
+        pts.push(spiral(t));
+      }
+      const pathIt = () => {
+        ctx.beginPath();
+        pts.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
+      };
+
+      // ① 柔光雾（宽的、低透明度，模拟灯管散光）
+      ctx.globalAlpha = isHot ? 0.30 : 0.18;
+      ctx.strokeStyle = ag.color;
+      ctx.lineWidth = isHot ? 30 : 24;
+      ctx.filter = 'blur(6px)';
+      pathIt(); ctx.stroke();
+      ctx.filter = 'none';
+
+      // ② 主体
+      ctx.shadowColor = ag.color;
+      ctx.shadowBlur = isHot ? 26 : 13;
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = ag.color;
+      ctx.lineWidth = isHot ? 12 : 9;
+      pathIt(); ctx.stroke();
+
+      // ③ 高光芯（让"灯管"亮起来）
+      ctx.shadowBlur = isHot ? 14 : 6;
+      ctx.shadowColor = '#ffffff';
+      ctx.globalAlpha = isHot ? 0.95 : 0.62;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = isHot ? 3.4 : 2.2;
+      pathIt(); ctx.stroke();
+
+      // ④ 段端点小圆点（首尾呼应，让段看起来是"事件"不是涂鸦）
+      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+      ctx.globalAlpha = isHot ? 1 : 0.85;
+      ctx.fillStyle = '#ffffff';
+      for(const p of [pts[0], pts[pts.length-1]]){
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, isHot ? 2.6 : 1.6, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+  });
+
+  // ── 4.5 人工记录（日记里的 [HH:MM]）—— 白色小菱点，与 agent 线区分 ──
+  if(journal.length){
+    journal.forEach(j => {
+      if(j.t > tNow) return;
+      const p = spiral(j.t);
+      const hot = (hotJournal === j.t);
+
+      ctx.save();
+      // 定位环：告诉眼睛"这个时刻有过人写的记录"
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, hot ? 9 : 6.5, 0, Math.PI*2);
+      ctx.strokeStyle = hot ? '#ffffff' : 'rgba(230,237,243,0.55)';
+      ctx.lineWidth = hot ? 2 : 1.4;
+      ctx.shadowColor = '#cfe4ff';
+      ctx.shadowBlur = hot ? 14 : 5;
+      ctx.stroke();
+
+      // 中心点
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, hot ? 3 : 2.2, 0, Math.PI*2);
+      ctx.fillStyle = '#e6edf3';
+      ctx.shadowBlur = 0;
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // ── 5. now 指示器 ──
+  if(tNow < TOTAL){
+    const p = spiral(tNow);
+    const pulse = 0.5 + 0.5*Math.sin(performance.now()/620);
+
+    // 从中心射出的指针
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(CX, CY);
+    ctx.lineTo(p.x, p.y);
+    ctx.strokeStyle = `rgba(88,166,255,${0.10 + pulse*0.10})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    // 光点
+    ctx.save();
+    ctx.shadowColor = '#58a6ff';
+    ctx.shadowBlur = 16 + pulse*12;
+    ctx.fillStyle = '#58a6ff';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4.2 + pulse*1.4, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.7, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // 环形波纹
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 8 + pulse*7, 0, Math.PI*2);
+    ctx.strokeStyle = `rgba(88,166,255,${0.28*(1-pulse)})`;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+
+  // ── 6. 中心钟面 ──
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '300 27px -apple-system,sans-serif';
+  if(tNow >= TOTAL){
+    ctx.fillText('全天', CX, CY-6);
+  }else{
+    const hh = Math.floor(tNow/3600), mm = Math.floor((tNow%3600)/60);
+    ctx.fillText(`${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`, CX, CY-6);
+  }
+
+  const secs = coveredSeconds(tNow);
+  ctx.fillStyle = '#4d5763';
+  ctx.font = '10px -apple-system,sans-serif';
+  ctx.fillText(fmtDur(secs) + ' 有记录', CX, CY+16);
+}
+
+/** 到 t 秒为止，被 agent 会话或日记记录覆盖的秒数（合并重叠）。
+ *  日记的一条时间戳按前后各 6 分钟算「那一刻在做事」。 */
+function coveredSeconds(t){
+  const iv = [];
+  agents.forEach(a => a.segments.forEach(([s,e]) => {
+    if(s < t) iv.push([s, Math.min(e,t)]);
+  }));
+  journal.forEach(j => {
+    if(j.t < t) iv.push([Math.max(0, j.t - 360), Math.min(t, j.t + 360)]);
+  });
+  iv.sort((a,b)=>a[0]-b[0]);
+  let total=0, cs=-1, ce=-1;
+  for(const [s,e] of iv){
+    if(e <= s) continue;
+    if(s > ce){ if(ce>cs) total += ce-cs; cs=s; ce=e; }
+    else ce = Math.max(ce,e);
+  }
+  if(ce>cs) total += ce-cs;
+  return total;
+}
+
+function fmtDur(sec){
+  sec = Math.round(sec);
+  if(sec < 60) return `${sec}s`;              // 短段别显示成 0m
+  const h = Math.floor(sec/3600), m = Math.round((sec%3600)/60);
+  if(h && m) return `${h}h${m}m`;
+  if(h) return `${h}h`;
+  return `${m}m`;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  侧栏
+// ══════════════════════════════════════════════════════════════
+function buildSidebar(){
+  const al = document.getElementById('agentList');
+  if(!agents.length){
+    al.innerHTML = '<div class="empty">今天还没有 agent 会话记录。</div>';
+  }else{
+    const LIMIT = 12;
+    const shown = showAllAgents ? agents : agents.slice(0, LIMIT);
+    al.innerHTML = shown.map((a,i) => {
+      const secs = a.segments.reduce((s,[x,y])=>s+(y-x),0);
+      const srcName = {claude:'Claude', codex:'Codex', pi:'PI'}[a.source] || a.source;
+      return `<div class="row" data-a="${i}">
+        <span class="dot" style="background:${a.color};box-shadow:0 0 8px ${a.color}66"></span>
+        <span class="rname">${esc(shortName(a.name))}<em>${a.segments.length}段</em></span>
+        <span class="src ${a.source||'claude'}">${srcName}</span>
+        <span class="rmeta"><b>${fmtDur(secs)}</b><br>${fmtTok(a.tokens)}</span>
+      </div>`;
+    }).join('');
+    if(agents.length > LIMIT){
+      const more = document.createElement('div');
+      more.className = 'morebtn';
+      more.textContent = showAllAgents
+        ? `收起（只看前 ${LIMIT} 个）`
+        : `展开全部 ${agents.length} 个来源`;
+      more.onclick = ()=>{ showAllAgents = !showAllAgents; buildSidebar(); };
+      al.appendChild(more);
+    }
+    al.querySelectorAll('.row').forEach(el=>{
+      const i = +el.dataset.a;
+      el.onmouseenter = ()=>{ hotAgent = i; hotIdx = -1; el.classList.add('hot'); };
+      el.onmouseleave = ()=>{ hotAgent = -1; el.classList.remove('hot'); };
+      el.onclick = ()=>{
+        // 跳到该 agent 第一段的时刻
+        const s = agents[i].segments[0][0];
+        if(liveMode){ liveMode=false; toggleBtns(); }
+        playT = s; 
+      };
+    });
+  }
+
+  const tl = document.getElementById('todoList');
+  if(!todos.length){
+    tl.innerHTML = '<div class="empty">今天日记里还没有「AI 代办」这一节。</div>';
+  }else{
+    tl.innerHTML = todos.map(t => `<div class="todo ${t.status}">
+      <span class="tick">${t.status==='done'?'✓':(t.status==='blocked'?'!':'')}</span>
+      <span class="ttext">${esc(t.text)}${t.result?`<span class="res">${esc(t.result)}</span>`:''}</span>
+    </div>`).join('');
+  }
+
+  // 日记里手写的时间戳
+  const jl = document.getElementById('journalList');
+  const jgrp = document.getElementById('journalGrp');
+  if(!journal.length){
+    jgrp.style.display = 'none';
+  }else{
+    jgrp.style.display = '';
+    jl.innerHTML = journal.map(j => `<div class="todo">
+      <span class="tick" style="border-color:#8fa4bb;color:#cfe4ff">·</span>
+      <span class="ttext"><span style="color:#8fb9e8;font-variant-numeric:tabular-nums">${j.time}</span>
+        ${esc(j.text.slice(0,50))}</span>
+    </div>`).join('');
+  }
+}
+
+function shortName(n){
+  return n.length > 24 ? n.slice(0,23)+'…' : n;
+}
+function fmtTok(n){
+  if(n >= 1e6) return (n/1e6).toFixed(2)+'M';
+  if(n >= 1e3) return (n/1e3).toFixed(0)+'k';
+  return String(n);
+}
+function esc(s){
+  return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+// ══════════════════════════════════════════════════════════════
+//  悬停命中检测
+// ══════════════════════════════════════════════════════════════
+let tipVisible = false;
+const tipEl = document.getElementById('tip');
+
+cv.addEventListener('mousemove', ev => {
+  const rect = cv.getBoundingClientRect();
+  const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+  const tNow = playT >= 0 ? playT : nowT;
+
+  let best = null, bestD = 22;   // 22px 命中半径（弧线有宽度，需要放宽）
+
+  // 先查日记点（优先级更高，它们更小更容易点不中）
+  hotJournal = -1;
+  journal.forEach(j => {
+    if(j.t > tNow) return;
+    const p = spiral(j.t);
+    const d = Math.hypot(p.x-mx, p.y-my);
+    if(d < 13 && (!best || d < bestD)){
+      best = {journal: j};
+      bestD = d;
+    }
+  });
+
+  if(!best) agents.forEach((ag, ai) => {
+    ag.segments.forEach(([s,e], si) => {
+      if(s > tNow) return;
+      const ve = Math.min(e, tNow);
+      // 采样密度：按弧长算，保证相邻采样点间距 < 3px
+      const arcPx = Math.abs(ve - s) / TOTAL * TURNS * Math.PI * 2 *
+                    ((R_OUT + R_IN) / 2);
+      const n = Math.max(8, Math.min(400, Math.ceil(arcPx / 3)));
+      for(let i=0; i<=n; i++){
+        const t = s + (ve - s) * (i/n);
+        const p = spiral(t);
+        const d = Math.hypot(p.x-mx, p.y-my);
+        if(d < bestD){ bestD = d; best = {ai, si, s, e, t}; }
+      }
+    });
+  });
+
+  if(best && best.journal){
+    // 日记记录
+    const j = best.journal;
+    hotJournal = j.t;
+    hotAgent = -1; hotIdx = -1;
+    tipEl.innerHTML =
+      `<b style="color:#e6edf3">日记记录</b>
+       <div class="tm">${j.time}</div>
+       <div class="sub">${esc(j.text.slice(0, 90))}</div>`;
+    tipEl.style.left = (ev.clientX + 16) + 'px';
+    tipEl.style.top  = (ev.clientY - 10) + 'px';
+    tipEl.classList.add('on');
+    cv.style.cursor = 'pointer';
+  }else if(best){
+    hotAgent = best.ai; hotIdx = best.si;
+    const ag = agents[best.ai];
+    const dur = best.e - best.s;
+    tipEl.innerHTML =
+      `<b style="color:${ag.color}">${esc(shortName(ag.name))}</b>
+       <div class="tm">${hhmm(best.s)} → ${hhmm(best.e)}</div>
+       <div class="sub">${fmtDur(dur)} · ${ag.segments.length} 段中的第 ${best.si+1} 段</div>`;
+    tipEl.style.left = (ev.clientX + 16) + 'px';
+    tipEl.style.top  = (ev.clientY - 10) + 'px';
+    tipEl.classList.add('on');
+    cv.style.cursor = 'pointer';
+  }else{
+    hotAgent = -1; hotIdx = -1; hotJournal = -1;
+    tipEl.classList.remove('on');
+    cv.style.cursor = 'crosshair';
+  }
+});
+cv.addEventListener('mouseleave', ()=>{
+  hotAgent=-1; hotIdx=-1; tipEl.classList.remove('on'); tipVisible=false;
+});
+
+function hhmm(sec){
+  const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  会话详情卡 + Obsidian 联动
+// ══════════════════════════════════════════════════════════════
+const detailEl = document.getElementById('detail');
+
+function openDiary(){
+  const uri = DATA && DATA.diary_uri;
+  if(uri) window.open(uri, '_blank');
+}
+
+function showDetail(ai, mx, my){
+  const ag = agents[ai];
+  if(!ag) return;
+  const secs = ag.segments.reduce((s,[x,y])=>s+(y-x),0);
+  const srcName = {claude:'Claude Code', codex:'Codex', pi:'PI'}[ag.source] || ag.source;
+  const rows = ag.segments.map(([s,e],si)=>
+    `<div class="seg" data-s="${s}">
+       <span class="dot" style="background:${ag.color}"></span>
+       <span class="t">${hhmm(s)}–${hhmm(e)}</span>
+       <span class="d">${fmtDur(e-s)}</span>
+     </div>`).join('');
+  detailEl.innerHTML = `
+    <header>
+      <div class="dh">
+        <h2>${esc(shortName(ag.name))}</h2>
+        <span class="src ${ag.source} dsrc">${srcName}</span>
+      </div>
+      <button class="x" onclick="hideDetail()">✕</button>
+    </header>
+    <div class="body">
+      ${ag.first_prompt ? `<div class="fp"><span class="lbl">开场指令</span>${esc(ag.first_prompt)}</div>` : ''}
+      <div class="dstat">
+        ${fmtDur(secs)} · ${ag.segments.length} 段 · ${fmtTok(ag.tokens)} tokens<br>
+        ${esc(ag.cwd || '')}
+      </div>
+      ${rows}
+    </div>`;
+  // 定位：贴着鼠标，别出画布
+  const stage = document.getElementById('stage');
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  const x = Math.min(Math.max(12, mx - 150), sw - 315);
+  const y = Math.min(Math.max(12, my + 14), sh - 320);
+  detailEl.style.left = x + 'px';
+  detailEl.style.top  = y + 'px';
+  detailEl.classList.add('on');
+  // 点击某段 → 回放跳到那一段开头
+  detailEl.querySelectorAll('.seg').forEach(el=>{
+    el.onclick = ()=>{
+      const s = +el.dataset.s;
+      playing = true; playT = s; playStart = Date.now() - s/ TOTAL * 12000;
+      liveMode = false; toggleBtns();
+      hideDetail();
+    };
+  });
+}
+function hideDetail(){ detailEl.classList.remove('on'); }
+window.hideDetail = hideDetail;
+
+// 点击画布：悬停状态决定行为
+cv.addEventListener('click', ev => {
+  const rect = cv.getBoundingClientRect();
+  const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+  if(hotJournal >= 0){ openDiary(); return; }
+  if(hotAgent >= 0){ showDetail(hotAgent, ev.clientX - rect.left, ev.clientY - rect.top); }
+});
+
+// 点侧栏待办 / 日记记录 → 打开 Obsidian 对应笔记
+document.addEventListener('click', ev => {
+  const todo = ev.target.closest('.todo');
+  if(todo && DATA && DATA.diary_uri && ev.target.closest('#todoList, #journalList')){
+    window.open(DATA.diary_uri, '_blank');
+  }
+});
+
+// 嵌入 Obsidian：复制 iframe 片段
+document.getElementById('btnEmbed').onclick = async () => {
+  const url = location.origin + location.pathname;
+  const snippet = `<iframe src="${url}" width="100%" height="560" style="border:none;border-radius:12px"></iframe>`;
+  try{
+    await navigator.clipboard.writeText(snippet);
+    const btn = document.getElementById('btnEmbed');
+    const old = btn.textContent;
+    btn.textContent = '✓ 已复制，去笔记里粘贴';
+    setTimeout(()=>btn.textContent = old, 2200);
+  }catch(e){
+    prompt('复制下面这行粘进任意笔记：', snippet);
+  }
+};
+
+// 键盘：空格播放/停止，←→切日期
+document.addEventListener('keydown', ev => {
+  if(ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+  if(ev.code === 'Space'){
+    ev.preventDefault(); btnPlay.click();
+  }else if(ev.key === 'ArrowLeft'){
+    shiftDay(-1);
+  }else if(ev.key === 'ArrowRight'){
+    if(viewDate < todayStr) shiftDay(1);
+  }else if(ev.key === 'Escape'){
+    hideDetail();
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  播放 / 实时
+// ══════════════════════════════════════════════════════════════
+const btnPlay = document.getElementById('btnPlay');
+const btnLive = document.getElementById('btnLive');
+
+function toggleBtns(){
+  btnPlay.classList.toggle('on', playing);
+  btnPlay.textContent = playing ? '⏸ 停止' : '▶ 播放今天';
+  btnLive.classList.toggle('on', liveMode && !playing);
+}
+
+btnPlay.onclick = () => {
+  if(playing){ playing = false; playT = -1; liveMode = true; }
+  else {
+    playing = true; playT = 0; playStart = Date.now(); liveMode = false;
+  }
+  toggleBtns(); updateHUD();   // 停止那一刻也要刷新 meta，别让"回放中"挂着
+};
+btnLive.onclick = () => {
+  playing = false; playT = -1; liveMode = true;
+  if(viewDate !== todayStr){ loadDay(todayStr); return; }   // 看历史时点实时 = 回今天
+  nowT = Math.max(0, Math.min(TOTAL, (Date.now() - dayStart)/1000));
+  updateHUD(); toggleBtns();
+};
+
+// ══════════════════════════════════════════════════════════════
+//  主循环
+// ══════════════════════════════════════════════════════════════
+let lastRealUpdate = 0;
+
+function loop(ts){
+  // 播放：8 秒扫完一天。用 Date.now() 统一时基，别跟 rAF 的 ts 混用
+  if(playing){
+    const el = (Date.now() - playStart) / 1000;
+    playT = Math.min(TOTAL, el / 12 * TOTAL);   // 12 秒扫完一天，能看清生长
+    if(playT >= TOTAL){
+      playing = false; playT = -1; liveMode = true; toggleBtns();
+    }
+    updateHUD();
+  }
+
+  // 实时模式：每 5 秒同步一次真实时间（只在看今天时；历史日子不覆盖）
+  if(liveMode && !playing && viewDate === todayStr && ts - lastRealUpdate > 5000){
+    lastRealUpdate = ts;
+    nowT = Math.max(0, Math.min(TOTAL, (Date.now() - dayStart)/1000));
+    updateHUD();
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function updateHUD(){
+  const t = playT >= 0 ? playT : nowT;
+  document.getElementById('hudClock').textContent =
+    t >= TOTAL ? '全天' : hhmm(t);
+  document.getElementById('hudMeta').textContent =
+    playing ? '回放中' : (viewDate !== todayStr ? '历史' : '');
+
+  const cov = coveredSeconds(t);
+  const passed = Math.min(t, TOTAL);
+  const gap = Math.max(0, passed - cov);
+
+  // agent 独占时长（合并重叠，不重复计）
+  const aiv = [];
+  agents.forEach(a => a.segments.forEach(([s,e]) => {
+    if(s < t) aiv.push([s, Math.min(e,t)]);
+  }));
+  aiv.sort((x,y)=>x[0]-y[0]);
+  let agentSecs=0, cs=-1, ce=-1;
+  for(const [s,e] of aiv){
+    if(e<=s) continue;
+    if(s>ce){ if(ce>cs) agentSecs+=ce-cs; cs=s; ce=e; } else ce=Math.max(ce,e);
+  }
+  if(ce>cs) agentSecs += ce-cs;
+
+  document.getElementById('capRec').textContent = fmtDur(cov);
+  document.getElementById('capGap').textContent = fmtDur(gap);
+  document.getElementById('capPct').textContent = passed > 0
+    ? `已过 ${fmtDur(passed)} · 机器 ${Math.round(agentSecs/passed*100)}% · 人+机器 ${Math.round(cov/passed*100)}%`
+    : '';
+
+  const fill = document.getElementById('capFill');
+  fill.style.width = passed>0 ? Math.min(100, cov/passed*100)+'%' : '0%';
+}
+
+// ══════════════════════════════════════════════════════════════
+window.addEventListener('resize', ()=>{ resize(); });
+setInterval(updateHUD, 3000);   // 数字平滑更新
+boot();
+</script>
+</body>
+</html>
